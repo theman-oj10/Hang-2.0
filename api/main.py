@@ -2,6 +2,7 @@ import os
 from langchain_openai import OpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence
+from langchain_ollama.llms import OllamaLLM
 from dotenv import load_dotenv
 import json
 import re
@@ -12,7 +13,8 @@ from datetime import datetime, timedelta
 load_dotenv()
 open_ai_key = os.getenv("OPEN_AI_KEY")
 
-llm = OpenAI(api_key=open_ai_key, temperature=0.7, max_tokens=256)
+#llm = OpenAI(api_key=open_ai_key, temperature=0.7, max_tokens=256)
+llm = OllamaLLM(model="llama3.1:8b") # smallest model for faster response times
 
 # Yelp category options
 cuisine_options = {
@@ -238,33 +240,45 @@ def score_restaurant(restaurant, user_data):
     score = 0
 
     # Base score is the rating
-    score += restaurant['rating'] * 2  # Multiply by 2 to give it more weight
+    # Multiply by 2 to give it more weight
+    score += restaurant['rating'] * 2
 
-    # Check if cuisine matches user preferences
-    restaurant_categories = [cat['alias'].lower()
-                             for cat in restaurant['categories']]
+     # Check if cuisine matches user preferences (weighted more heavily)
+    restaurant_categories = [cat['alias'].lower() for cat in restaurant['categories']]
     for cuisine in user_data['cuisines']:
         if cuisine.lower() in restaurant_categories:
+            score += 2  # Increased from 1 to 2
+
+       # Check if favorite food matches (weighted more heavily)
+        for fav_food in user_data['favFood']:
+           if fav_food.lower() in restaurant_categories:
+               score += 1.5  # Increased from 1 to 1.5
+
+       # Check if special category matches
+        for special_cat in user_data['specialCategory']:
+           if special_cat.lower() in restaurant_categories:
+               score += 1
+
+       # Check price preference (more nuanced approach)
+        price = len(restaurant.get('price', '$'))
+        user_age = user_data['age']
+        if user_age < 25 and price <= 2:
+            score += 1
+        elif 25 <= user_age < 40 and 2 <= price <= 3:
+            score += 1
+        elif user_age >= 40 and price >= 3:
             score += 1
 
-    # Check if favorite food matches
-    for fav_food in user_data['favFood']:
-        if fav_food.lower() in restaurant_categories:
+        # Penalty for alcohol if user doesn't prefer it
+        if not user_data['alcohol'] and any('bar' in cat.lower() for cat in restaurant_categories):
+            score -= 2  # Increased penalty
+
+        # Bonus for high review count (indicates popularity)
+        review_count = restaurant.get('review_count', 0)
+        if review_count > 100:
+            score += 0.5
+        elif review_count > 500:
             score += 1
-
-    # Check if special category matches
-    for special_cat in user_data['specialCategory']:
-        if special_cat.lower() in restaurant_categories:
-            score += 1
-
-    # Check price preference (assuming user prefers middle range if not specified)
-    price = len(restaurant.get('price', '$'))
-    if 1 <= price <= 2:
-        score += 0.5
-
-    # Penalty for alcohol if user doesn't prefer it
-    if not user_data['alcohol'] and 'bars' in restaurant_categories:
-        score -= 1
 
     return score
 
@@ -277,11 +291,13 @@ def adaptive_yelp_search(user_data, max_attempts=3):
         "pref_date_time": (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
     }
     all_results = []
+    all_categories = set()  # Keep track of all categories used
 
     for attempt in range(max_attempts):
         print(f"\nAttempt {attempt + 1}:")
 
         categories = extract_yelp_categories(user_data, previous_attempt)
+        all_categories.update(categories.split(','))  # Add to all categories
         print(f"Extracted categories: {categories}")
 
         try:
@@ -320,12 +336,13 @@ def adaptive_yelp_search(user_data, max_attempts=3):
             traceback.print_exc()
             previous_attempt = f"Error: {str(e)}"
 
-    # If no results found after all attempts, fallback to any restaurants
+    # If no results found after all attempts, fallback to all categories used
     if not all_results:
-        print("\nNo results found. Falling back to general restaurant search.")
+        print("\nNo results found. Falling back to search with all categories used.")
+        fallback_categories = ','.join(all_categories)
         fallback_results = location_search(
             location=params["location"],
-            category="restaurants",
+            category=fallback_categories,
             pref_price="1,2,3,4",
             pref_date_time=params["pref_date_time"]
         )
@@ -371,6 +388,6 @@ example_user = {
     "activityPref": ['outdoor', 'cultural', 'entertainment']
 }
 
-# final_results = adaptive_yelp_search(example_user,max_attempts=3)
-# print("\nFinal Recommendations:")
-# print(final_results)
+final_results = adaptive_yelp_search(example_user,max_attempts=3)
+print("\nFinal Recommendations:")
+print(final_results)
