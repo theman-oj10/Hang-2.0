@@ -12,7 +12,7 @@ def date_to_unix(date_time):
     return int(datetime.strptime(date_time, "%Y-%m-%d %H:%M:%S").timestamp())
 
 
-def location_search(location, category, pref_price, pref_date_time):
+def yelp_search(location, category, pref_price, pref_date_time):
     if not yelp_api_key:
         raise ValueError("YELP_API_KEY not found in environment variables")
 

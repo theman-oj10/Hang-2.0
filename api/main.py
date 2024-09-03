@@ -6,7 +6,7 @@ from langchain_ollama.llms import OllamaLLM
 from dotenv import load_dotenv
 import json
 import re
-from yelp_api import location_search
+from yelp_api import yelp_search
 from datetime import datetime, timedelta
 
 # Load environment variables
@@ -93,11 +93,17 @@ def summarize_user_data(user_data):
 def summarize_api_results(api_results):
     businesses = api_results.get('businesses', [])
     summary = f"Found {len(businesses)} restaurants. "
+
     if businesses:
-        top_3 = businesses[:3]
-        summary += "Top 3: " + \
-            ", ".join(
-                [f"{b['name']} ({b['categories'][0]['title']})" for b in top_3])
+        # Include details for up to 10 restaurants
+        top_10 = businesses[:10]
+        summary += "Details:\n"
+        for i, b in enumerate(top_10, 1):
+            summary += f"{i}. {b['name']} ({', '.join([cat['title'] for cat in b['categories']])}) - Rating: {b['rating']}, Price: {b.get('price', 'N/A')}\n"
+
+        if len(businesses) > 10:
+            summary += f"... and {len(businesses) - 10} more restaurants."
+
     return summary
 
 
@@ -110,7 +116,7 @@ extract_categories_template = PromptTemplate(
     Valid Categories: {valid_categories}
 
     Based on the user data and previous attempt, select appropriate categories for a Yelp API search.
-    Only use categories from the provided list of valid categories.
+    Only use categories from the provided list of valid categories. Don't add new categories.
     Provide your response as a comma-separated list of category aliases (keys), not the full names.
     For example: "italian,pizza,vegetarian"
 
@@ -126,8 +132,8 @@ evaluate_results_template = PromptTemplate(
     Categories: {categories}
     Current Price Range: {current_price}
     Results: {api_results}
-    Evaluate if the results are satisfactory for a restaurant search in Singapore, ensuring dietary preferences are met where possible.
-    Results are satisfactory when all dietary preferences are met and there are cuisines and food options that match the user's preferences.
+    Evaluate if the results are satisfactory for a restaurant search in Singapore, ensuring dietary preferences are always met.
+    Results are satisfactory when dietary preferences are all met and as many cuisines and food options match the user's preferences as possible.
     If not fully satisfactory but results are present, suggest improvements while accepting current results.
     If no results, suggest significant changes to broaden the search.
 
@@ -147,7 +153,6 @@ evaluate_results_template = PromptTemplate(
 extract_chain = RunnableSequence(extract_categories_template | llm)
 evaluate_chain = RunnableSequence(evaluate_results_template | llm)
 
-
 # Create a set of all valid Yelp API categories
 valid_categories = set(cuisine_options.keys()) | set(dietary_options.keys()) | \
     set(fav_food_options.keys()) | set(special_food_options.keys()) | \
@@ -156,21 +161,53 @@ valid_categories = set(cuisine_options.keys()) | set(dietary_options.keys()) | \
 
 def extract_yelp_categories(user_data, previous_attempt=""):
     user_data_summary = summarize_user_data(user_data)
-    result = extract_chain.invoke({
-        "user_data": user_data_summary,
-        "previous_attempt": previous_attempt,
-        "valid_categories": ", ".join(valid_categories)
-    })
+    print(f"User data Summary: {user_data_summary}")
+    # Initialize a set to store potential categories
+    potential_categories = set()
 
-    print("Debug - Raw LLM output:", result)
+    # Add user's cuisine preferences
+    potential_categories.update(user_data['cuisines'])
 
-    # Filter and join valid categories
-    categories = [cat.strip().lower() for cat in result.split(
-        ',') if cat.strip().lower() in valid_categories]
-    categories = categories[:3]  # Limit to at most 3 categories
-    categories_string = ','.join(categories)
+    # Add user's favorite foods
+    potential_categories.update(user_data['favFood'])
 
-    return categories_string if categories_string else "restaurants"
+    # Add user's special categories
+    potential_categories.update(user_data['specialCategory'])
+
+    # Add dietary preferences
+    potential_categories.update(user_data['dietPref'])
+
+    # If user drinks alcohol, add alcohol options
+    if user_data['alcohol']:
+        potential_categories.update(alcohol_options.keys())
+
+    # Filter potential categories to only include valid Yelp categories
+    valid_potential_categories = potential_categories.intersection(
+        valid_categories)
+
+    print(f"Initial Category Search: {valid_potential_categories}")
+    # If we don't have enough categories, use the LLM to suggest more
+    if len(valid_potential_categories) < 3:
+        llm_result = extract_chain.invoke({
+            "user_data": user_data_summary,
+            "previous_attempt": previous_attempt,
+            "valid_categories": ", ".join(valid_categories)
+        })
+        llm_categories = [cat.strip().lower() for cat in llm_result.split(
+            ',') if cat.strip().lower() in valid_categories]
+        valid_potential_categories.update(llm_categories)
+
+    # Select the top 3 categories (or fewer if not enough)
+    final_categories = list(valid_potential_categories)[:3]
+
+    # If we still don't have enough categories, add "restaurants" as a fallback
+    while len(final_categories) < 3:
+        if "restaurants" not in final_categories:
+            final_categories.append("restaurants")
+        else:
+            break
+
+    return ','.join(final_categories)
 
 
 def parse_llm_response(response):
@@ -238,91 +275,164 @@ def filter_restaurants_by_diet(restaurants, diet_prefs):
 
 def score_restaurant(restaurant, user_data):
     score = 0
+    restaurant_categories = [cat['alias'].lower()
+                             for cat in restaurant['categories']]
 
     # Base score is the rating
-    # Multiply by 2 to give it more weight
     score += restaurant['rating'] * 2
 
-     # Check if cuisine matches user preferences (weighted more heavily)
-    restaurant_categories = [cat['alias'].lower() for cat in restaurant['categories']]
+    # Check if cuisine matches user preferences (highest priority)
+    cuisine_match = False
     for cuisine in user_data['cuisines']:
         if cuisine.lower() in restaurant_categories:
-            score += 2  # Increased from 1 to 2
+            score += 10  # Increased from 5 to 10
+            cuisine_match = True
+            break  # Only count one cuisine match
 
-       # Check if favorite food matches (weighted more heavily)
-        for fav_food in user_data['favFood']:
-           if fav_food.lower() in restaurant_categories:
-               score += 1.5  # Increased from 1 to 1.5
+    # Check if favorite food matches (second highest priority)
+    fav_food_match = False
+    for fav_food in user_data['favFood']:
+        if fav_food.lower() in restaurant_categories:
+            score += 4
+            fav_food_match = True
+            break  # Only count one favorite food match
 
-       # Check if special category matches
-        for special_cat in user_data['specialCategory']:
-           if special_cat.lower() in restaurant_categories:
-               score += 1
+    # Bonus if both cuisine and favorite food match
+    if cuisine_match and fav_food_match:
+        score += 3
 
-       # Check price preference (more nuanced approach)
-        price = len(restaurant.get('price', '$'))
-        user_age = user_data['age']
-        if user_age < 25 and price <= 2:
+    # Check if special category matches (lower priority)
+    for special_cat in user_data['specialCategory']:
+        if special_cat.lower() in restaurant_categories:
             score += 1
-        elif 25 <= user_age < 40 and 2 <= price <= 3:
-            score += 1
-        elif user_age >= 40 and price >= 3:
-            score += 1
 
-        # Penalty for alcohol if user doesn't prefer it
-        if not user_data['alcohol'] and any('bar' in cat.lower() for cat in restaurant_categories):
-            score -= 2  # Increased penalty
+    # Check price preference
+    restaurant_price = restaurant.get('price', '$')
+    restaurant_price_level = len(restaurant_price)
+    user_age = user_data['age']
 
-        # Bonus for high review count (indicates popularity)
-        review_count = restaurant.get('review_count', 0)
-        if review_count > 100:
-            score += 0.5
-        elif review_count > 500:
-            score += 1
+    if user_age < 25:
+        preferred_price_levels = [1, 2]
+    elif 25 <= user_age < 40:
+        preferred_price_levels = [2, 3]
+    else:
+        preferred_price_levels = [3, 4]
+
+    if restaurant_price_level in preferred_price_levels:
+        score += 1
+
+    # Penalty for alcohol if user doesn't prefer it
+    if not user_data['alcohol'] and any('bar' in cat.lower() for cat in restaurant_categories):
+        score -= 2
+
+    # Bonus for high review count (indicates popularity)
+    review_count = restaurant.get('review_count', 0)
+    if review_count > 100:
+        score += 0.5
+    elif review_count > 500:
+        score += 1
 
     return score
 
 
+def extract_categories_from_user(user_data):
+    # Start with dietary preferences
+    categories = user_data['dietPref']
+
+    # Extract other categories
+    other_categories = set()
+
+    # Properly handle cuisines
+    if user_data['cuisines']:
+        cuisines = user_data['cuisines'][0].split(', ')
+        for cuisine in cuisines:
+            # Find the key for the cuisine value
+            cuisine_key = next((key for key, value in cuisine_options.items(
+            ) if value.lower() == cuisine.lower()), None)
+            if cuisine_key:
+                other_categories.add(cuisine_key)
+            else:
+                print(
+                    f"Warning: Cuisine '{cuisine}' not found in cuisine_options.")
+
+    # Add favorite foods
+    for food in user_data['favFood']:
+        if food:  # Check if the food is not an empty string
+            food_key = next((key for key, value in fav_food_options.items(
+            ) if value.lower() == food.lower()), None)
+            if food_key:
+                other_categories.add(food_key)
+            else:
+                print(
+                    f"Warning: Favorite food '{food}' not found in fav_food_options.")
+
+    # Add special categories
+    for category in user_data['specialCategory']:
+        category_key = next((key for key, value in special_food_options.items(
+        ) if value.lower() == category.lower()), None)
+        if category_key:
+            other_categories.add(category_key)
+        else:
+            print(
+                f"Warning: Special category '{category}' not found in special_food_options.")
+
+    if user_data['alcohol']:
+        other_categories.update(alcohol_options.keys())
+
+    # Filter to valid categories
+    valid_other_categories = list(
+        other_categories.intersection(valid_categories))
+
+    # Combine categories with dietary preferences first
+    all_categories = categories + valid_other_categories
+
+    # Remove duplicates while preserving order
+    unique_categories = []
+    for category in all_categories:
+        if category not in unique_categories:
+            unique_categories.append(category)
+
+    return ','.join(unique_categories)
+
+
 def adaptive_yelp_search(user_data, max_attempts=3):
-    previous_attempt = ""
     params = {
         "location": "Singapore",
         "price": "1,2,3,4",  # Start with all price ranges
         "pref_date_time": (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
     }
+    categories = extract_categories_from_user(user_data)
     all_results = []
-    all_categories = set()  # Keep track of all categories used
+    print(f"Initial categories: {categories}")
 
     for attempt in range(max_attempts):
         print(f"\nAttempt {attempt + 1}:")
-
-        categories = extract_yelp_categories(user_data, previous_attempt)
-        all_categories.update(categories.split(','))  # Add to all categories
-        print(f"Extracted categories: {categories}")
+        print(f"Searching with categories: {categories}")
 
         try:
-            api_results = location_search(
+            api_results = yelp_search(
                 location=params["location"],
                 category=categories,
                 pref_price=params["price"],
                 pref_date_time=params["pref_date_time"]
             )
 
-            filtered_results = filter_restaurants_by_diet(
-                api_results.get('businesses', []), user_data['dietPref'])
-            print(f"Filtered results: {len(filtered_results)} restaurants")
-
-            all_results.extend(filtered_results)
-
             evaluation = evaluate_results(
                 user_data,
-                categories,
-                {"businesses": filtered_results},
+                categories.split(','),
+                api_results,
                 params["price"]
             )
             print(f"Evaluation: {evaluation}")
 
-            previous_attempt = f"Previous: {categories}. Reason: {evaluation['reason']}"
+            filtered_results = filter_restaurants_by_diet(
+                api_results.get('businesses', []), user_data['dietPref'])
+            for restaurant in filtered_results:
+                restaurant['score'] = score_restaurant(restaurant, user_data)
+
+            all_results.extend(filtered_results)
+            print(
+                f"Found {len(filtered_results)} results matching dietary preferences.")
 
             if evaluation['new_categories']:
                 categories = evaluation['new_categories']
@@ -334,25 +444,11 @@ def adaptive_yelp_search(user_data, max_attempts=3):
             print("Traceback:")
             import traceback
             traceback.print_exc()
-            previous_attempt = f"Error: {str(e)}"
-
-    # If no results found after all attempts, fallback to all categories used
-    if not all_results:
-        print("\nNo results found. Falling back to search with all categories used.")
-        fallback_categories = ','.join(all_categories)
-        fallback_results = location_search(
-            location=params["location"],
-            category=fallback_categories,
-            pref_price="1,2,3,4",
-            pref_date_time=params["pref_date_time"]
-        )
-        all_results = fallback_results.get('businesses', [])
 
     # Remove duplicates and sort by score
     unique_results = {}
     for restaurant in all_results:
         if restaurant['id'] not in unique_results:
-            restaurant['score'] = score_restaurant(restaurant, user_data)
             unique_results[restaurant['id']] = restaurant
 
     top_recommendations = sorted(
@@ -369,9 +465,17 @@ def adaptive_yelp_search(user_data, max_attempts=3):
         "address": ' '.join(restaurant['location']['display_address']),
         "categories": [cat['title'] for cat in restaurant['categories']],
         "url": restaurant['url'],
-        # Include the score in the output for reference
         "score": restaurant['score']
     } for restaurant in top_recommendations], indent=2)
+    
+    # Alternatively, return the last search's results
+    # If no satisfactory results found, use all results from the last attempt
+    # if not all_satisfactory_results:
+    #     print("\nNo satisfactory results found. Using all results from the last attempt.")
+    #     all_satisfactory_results = api_results.get('businesses', [])
+    #     for restaurant in all_satisfactory_results:
+    #         restaurant['score'] = score_restaurant(restaurant, user_data)
+    
 
 
 # Example usage
@@ -380,10 +484,10 @@ example_user = {
     "userName": "johndoe123",
     "age": 25,
     "gender": "male",
-    "dietPref": ['halal'],
+    "dietPref": ['vegetarian'],
     "alcohol": False,
-    "cuisines": ["mexican"],
-    "favFood": ["pizza"],
+    "cuisines": ["Indian, Mexican"],
+    "favFood": [""],
     "specialCategory": [],
     "activityPref": ['outdoor', 'cultural', 'entertainment']
 }
