@@ -1,497 +1,426 @@
 import os
 from langchain_openai import OpenAI
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence
 from langchain_ollama.llms import OllamaLLM
 from dotenv import load_dotenv
 import json
-import re
 from yelp_api import yelp_search
 from datetime import datetime, timedelta
+from itertools import combinations
+from data import cuisine_options, dietary_options, fav_food_options, special_food_options, alcohol_options
+import shutil
 
 # Load environment variables
 load_dotenv()
-open_ai_key = os.getenv("OPEN_AI_KEY")
+open_ai_key = os.getenv("OPENAI_API_KEY")
 
-#llm = OpenAI(api_key=open_ai_key, temperature=0.7, max_tokens=256)
-llm = OllamaLLM(model="llama3.1:8b") # smallest model for faster response times
+# Initialize LLM and embeddings
+llm = OllamaLLM(model="llama3.1:8b")
+embeddings = OpenAIEmbeddings(openai_api_key=open_ai_key)
 
-# Yelp category options
-cuisine_options = {
-    "afghani": "Afghani", "african": "African", "arabian": "Arabian", "argentine": "Argentine",
-    "asianfusion": "Asian Fusion", "australian": "Australian", "austrian": "Austrian",
-    "bangladeshi": "Bangladeshi", "bbq": "BBQ", "belgian": "Belgian", "brasseries": "Brasseries",
-    "brazilian": "Brazilian", "british": "British", "burgers": "Burgers", "burmese": "Burmese",
-    "cambodian": "Cambodian", "caribbean": "Caribbean", "chickenshop": "Chicken Shop",
-    "chinese": "Chinese", "dumplings": "Dumplings", "hotdogs": "Fast Food", "filipino": "Filipino",
-    "fishnchips": "Fish and Chips", "fondue": "Fondue", "food_court": "Food Court",
-    "foodstands": "Food Stands", "french": "French", "gamemeat": "Game Meat",
-    "gastropubs": "Gastropubs", "german": "German", "greek": "Greek", "guamanian": "Guamanian",
-    "hawaiian": "Hawaiian", "himalayan": "Himalayan", "honduran": "Honduran", "hotpot": "Hot Pot",
-    "hungarian": "Hungarian", "indonesian": "Indonesian", "indpak": "Indian",
-    "international": "International", "irish": "Irish", "italian": "Italian", "japanese": "Japanese",
-    "kebab": "Kebab", "kopitiam": "Kopitiam", "korean": "Korean", "kosher": "Kosher",
-    "laotian": "Laotian", "latin": "Latin", "malaysian": "Malaysian", "mediterranean": "Mediterranean",
-    "mexican": "Mexican", "mideastern": "Middle Eastern", "modern_european": "Modern European",
-    "mongolian": "Mongolian", "moroccan": "Moroccan", "nicaraguan": "Nicaraguan",
-    "noodles": "Noodles", "pakistani": "Pakistani", "panasian": "Pan Asian", "persian": "Persian",
-    "portuguese": "Portuguese", "raw_food": "Raw Food", "russian": "Russian",
-    "scandinavian": "Scandinavian", "seafood": "Seafood", "singaporean": "Singaporean",
-    "soup": "Soup", "spanish": "Spanish", "srilankan": "Sri Lankan", "syrian": "Syrian",
-    "taiwanese": "Taiwanese", "tapasmallplates": "Tapas/Small Plates", "tex-mex": "Tex-Mex",
-    "thai": "Thai", "tradamerican": "Traditional American", "turkish": "Turkish",
-    "ukrainian": "Ukrainian", "venison": "Venison", "vietnamese": "Vietnamese"
-}
+# Create a vector store for restaurant data
+# Initialize the database once
+restaurant_db = Chroma(embedding_function=OpenAIEmbeddings(),
+                       persist_directory="./chroma_db")
 
-dietary_options = {
-    "vegetarian": "Vegetarian", "vegan": "Vegan", "gluten_free": "Gluten Free",
-    "halal": "Halal", "kosher": "Kosher"
-}
+def empty_db(db):
+    # Get all existing IDs
+    existing_ids = db.get()["ids"]
+    if existing_ids:
+        # Delete all existing documents
+        db.delete(existing_ids)
+    print(f"Cleared {len(existing_ids)} documents from the database.")
 
-fav_food_options = {
-    "acaibowls": "Acai Bowls", "bagels": "Bagels", "bubbletea": "Bubble Tea",
-    "chicken_wings": "Chicken Wings", "coffee": "Coffee", "cupcakes": "Cupcakes",
-    "donuts": "Donuts", "gelato": "Gelato", "nasilemak": "Nasi Lemak", "pizza": "Pizza",
-    "poke": "Poke", "hotdog": "Hot Dog", "icecream": "Ice Cream", "salad": "Salad",
-    "sandwiches": "Sandwiches", "shavedice": "Shaved Ice", "shavedsnow": "Shaved Snow",
-    "tea": "Tea", "waffles": "Waffles", "steak": "Steak", "sushi": "Sushi", "soup": "Soup",
-    "fishnchips": "Fish and Chips", "burgers": "Burgers", "dumplings": "Dumplings",
-    "fondue": "Fondue"
-}
-
-special_food_options = {
-    "bakeries": "Bakeries", "breweries": "Breweries", "cakeshop": "Cake Shop",
-    "cideries": "Cideries", "coffeeroasteries": "Coffee Roasteries", "customcakes": "Custom Cakes",
-    "delicatessen": "Delicatessen", "desserts": "Desserts", "distilleries": "Distilleries",
-    "diyfood": "DIY Food", "gourmet": "Gourmet", "importedfood": "Imported Food",
-    "internetcafe": "Internet Cafe", "intlgrocery": "International Grocery",
-    "juicebars": "Juice Bars", "smokehouse": "Smokehouse", "streetvendors": "Street Vendors",
-    "bistros": "Bistros", "breakfast_brunch": "Breakfast & Brunch", "buffets": "Buffets",
-    "popuprestaurants": "Popup Restaurants", "creperies": "Creperies", "delis": "Delis",
-    "diners": "Diners", "dinnertheater": "Dinner Theater", "farmersmarket": "Farmers Market",
-    "grocery": "Grocery", "hawkercentre": "Hawker Centre", "organic_stores": "Organic Stores"
-}
-
-alcohol_options = {
-    "airportlounges": "Airport Lounges", "beachbars": "Beach Bars", "beerbar": "Beer Bar",
-    "champagne_bars": "Champagne Bars", "cocktailbars": "Cocktail Bars", "divebars": "Dive Bars",
-    "gaybars": "Gay Bars", "irish_pubs": "Irish Pubs", "lounges": "Lounges", "pubs": "Pubs",
-    "speakeasies": "Speakeasies", "sportsbars": "Sports Bars", "tikibars": "Tiki Bars",
-    "vermouthbars": "Vermouth Bars", "whiskeybars": "Whiskey Bars", "wine_bars": "Wine Bars"
-}
-
-
-def summarize_user_data(user_data):
-    return f"Age: {user_data['age']}, Gender: {user_data['gender']}, " \
-           f"Diet: {', '.join(user_data['dietPref'])}, " \
-           f"Alcohol: {user_data['alcohol']}, " \
-           f"Cuisines: {', '.join(user_data['cuisines'])}, " \
-           f"Favorite Food: {', '.join(user_data['favFood'])}, " \
-           f"Special Category: {', '.join(user_data['specialCategory'])}"
-
-
-def summarize_api_results(api_results):
-    businesses = api_results.get('businesses', [])
-    summary = f"Found {len(businesses)} restaurants. "
-
-    if businesses:
-        # Include details for up to 10 restaurants
-        top_10 = businesses[:10]
-        summary += "Details:\n"
-        for i, b in enumerate(top_10, 1):
-            summary += f"{i}. {b['name']} ({', '.join([cat['title'] for cat in b['categories']])}) - Rating: {b['rating']}, Price: {b.get('price', 'N/A')}\n"
-
-        if len(businesses) > 10:
-            summary += f"... and {len(businesses) - 10} more restaurants."
-
-    return summary
-
-
-# Define the prompt templates
-extract_categories_template = PromptTemplate(
-    input_variables=["user_data", "previous_attempt", "valid_categories"],
-    template="""
-    User: {user_data}
-    Previous: {previous_attempt}
-    Valid Categories: {valid_categories}
-
-    Based on the user data and previous attempt, select appropriate categories for a Yelp API search.
-    Only use categories from the provided list of valid categories. Don't add new categories.
-    Provide your response as a comma-separated list of category aliases (keys), not the full names.
-    For example: "italian,pizza,vegetarian"
-
-    Selected Categories:
-    """
-)
-
-evaluate_results_template = PromptTemplate(
-    input_variables=["user_data", "categories",
-                     "api_results", "current_price"],
-    template="""
-    User: {user_data}
-    Categories: {categories}
-    Current Price Range: {current_price}
-    Results: {api_results}
-    Evaluate if the results are satisfactory for a restaurant search in Singapore, ensuring dietary preferences are always met.
-    Results are satisfactory when dietary preferences are all met and as many cuisines and food options match the user's preferences as possible.
-    If not fully satisfactory but results are present, suggest improvements while accepting current results.
-    If no results, suggest significant changes to broaden the search.
-
-    Respond ONLY with a JSON object in the following format, and nothing else:
-    {{
-        "satisfactory": true/false,
-        "reason": "Your reason here",
-        "new_categories": "cat1,cat2,cat3",
-        "new_price": "1,2,3,4"
-    }}
-
-    JSON Response:
-    """
-)
-
-# Create the RunnableSequences
-extract_chain = RunnableSequence(extract_categories_template | llm)
-evaluate_chain = RunnableSequence(evaluate_results_template | llm)
-
-# Create a set of all valid Yelp API categories
-valid_categories = set(cuisine_options.keys()) | set(dietary_options.keys()) | \
-    set(fav_food_options.keys()) | set(special_food_options.keys()) | \
-    set(alcohol_options.keys())
-
-
-def extract_yelp_categories(user_data, previous_attempt=""):
-    user_data_summary = summarize_user_data(user_data)
-    print(f"User data Summary: {user_data_summary}")
-    # Initialize a set to store potential categories
-    potential_categories = set()
-
-    # Add user's cuisine preferences
-    potential_categories.update(user_data['cuisines'])
-
-    # Add user's favorite foods
-    potential_categories.update(user_data['favFood'])
-
-    # Add user's special categories
-    potential_categories.update(user_data['specialCategory'])
-
-    # Add dietary preferences
-    potential_categories.update(user_data['dietPref'])
-
-    # If user drinks alcohol, add alcohol options
-    if user_data['alcohol']:
-        potential_categories.update(alcohol_options.keys())
-
-    # Filter potential categories to only include valid Yelp categories
-    valid_potential_categories = potential_categories.intersection(
-        valid_categories)
-
-    print(f"Initial Category Search: {valid_potential_categories}")
-    # If we don't have enough categories, use the LLM to suggest more
-    if len(valid_potential_categories) < 3:
-        llm_result = extract_chain.invoke({
-            "user_data": user_data_summary,
-            "previous_attempt": previous_attempt,
-            "valid_categories": ", ".join(valid_categories)
-        })
-        llm_categories = [cat.strip().lower() for cat in llm_result.split(
-            ',') if cat.strip().lower() in valid_categories]
-        valid_potential_categories.update(llm_categories)
-
-    # Select the top 3 categories (or fewer if not enough)
-    final_categories = list(valid_potential_categories)[:3]
-
-    # If we still don't have enough categories, add "restaurants" as a fallback
-    while len(final_categories) < 3:
-        if "restaurants" not in final_categories:
-            final_categories.append("restaurants")
-        else:
-            break
-
-    return ','.join(final_categories)
-
-
-def parse_llm_response(response):
-    json_match = re.search(r'\{[\s\S]*\}', response)
-    if json_match:
-        try:
-            parsed_json = json.loads(json_match.group())
-            if all(key in parsed_json for key in ['satisfactory', 'reason', 'new_categories', 'new_price']):
-                new_categories = [cat.strip().lower() for cat in parsed_json['new_categories'].split(
-                    ',') if cat.strip().lower() in valid_categories]
-                parsed_json['new_categories'] = ','.join(new_categories)
-                parsed_json['new_price'] = ','.join(
-                    sorted(set(parsed_json['new_price'].split(','))))
-                return parsed_json
-        except json.JSONDecodeError:
-            pass
-
-    satisfactory = 'true' in response.lower()
-    reason_match = re.search(r'reason"?\s*:?\s*"?([^"}\n]+)', response)
-    reason = reason_match.group(
-        1) if reason_match else "Unable to determine reason"
-    categories_match = re.search(
-        r'new_categories"?\s*:?\s*"?([^"}\n]+)', response)
-    new_categories = categories_match.group(1) if categories_match else ""
-    new_categories = ','.join([cat.strip().lower() for cat in new_categories.split(
-        ',') if cat.strip().lower() in valid_categories])
-    price_match = re.search(r'new_price"?\s*:?\s*"?([^"}\n]+)', response)
-    new_price = price_match.group(1) if price_match else "1,2,3,4"
-    new_price = ','.join(sorted(set(new_price.split(','))))
-
-    print("Failed to parse LLM response as JSON. Extracted information:")
-    print(f"Satisfactory: {satisfactory}")
-    print(f"Reason: {reason}")
-    print(f"New categories: {new_categories}")
-    print(f"New price: {new_price}")
-
-    return {
-        "satisfactory": satisfactory,
-        "reason": reason,
-        "new_categories": new_categories,
-        "new_price": new_price
+def extract_group_preferences(users):
+    group_prefs = {
+        "dietPref": [], "alcohol": False, "cuisines": [],
+        "favFood": [], "specialCategory": []
     }
 
+    for user in users:
+        group_prefs["alcohol"] |= user["alcohol"]
+        group_prefs["dietPref"].extend(user["dietPref"])
 
-def evaluate_results(user_data, categories, api_results, current_price):
-    user_data_summary = summarize_user_data(user_data)
-    api_results_summary = summarize_api_results(api_results)
-    result = evaluate_chain.invoke({
-        "user_data": user_data_summary,
-        "categories": ", ".join(categories),
-        "api_results": api_results_summary,
-        "current_price": current_price
-    })
-    return parse_llm_response(result)
+        # Process cuisines
+        for cuisine in user["cuisines"]:
+            full_cuisine = next(
+                (k for k, v in cuisine_options.items()
+                 if v.lower() == cuisine.lower()), None
+            )
+            if full_cuisine:  # Only append if full_cuisine is not None
+                group_prefs["cuisines"].append(full_cuisine)
+
+        # Process favorite foods
+        for food in user["favFood"]:
+            full_food = next(
+                (k for k, v in fav_food_options.items()
+                 if v.lower() == food.lower()), None
+            )
+            if full_food:  # Only append if full_food is not None
+                group_prefs["favFood"].append(full_food)
+
+        # Process special categories
+        for category in user["specialCategory"]:
+            full_category = next(
+                (k for k, v in special_food_options.items()
+                 if v.lower() == category.lower()), None
+            )
+            if full_category:  # Only append if full_category is not None
+                group_prefs["specialCategory"].append(full_category)
+
+    # Remove duplicates and empty strings
+    for key in group_prefs:
+        if isinstance(group_prefs[key], list):
+            group_prefs[key] = list(set(filter(None, group_prefs[key])))
+
+    return group_prefs
 
 
-def filter_restaurants_by_diet(restaurants, diet_prefs):
-    filtered = []
-    for restaurant in restaurants:
-        categories = [cat['alias'].lower() for cat in restaurant['categories']]
-        if all(pref.lower() in categories or pref.lower() in restaurant.get('name', '').lower() for pref in diet_prefs):
-            filtered.append(restaurant)
-    return filtered
+def meets_dietary_requirements(restaurant, group_prefs):
+    restaurant_categories = [cat['alias'].lower()
+                             for cat in restaurant['categories']]
+    restaurant_name_lower = restaurant['name'].lower()
 
+    for diet_pref in group_prefs["dietPref"]:
+        if diet_pref.lower() not in restaurant_categories and diet_pref.lower() not in restaurant_name_lower:
+            return False
+    return True
 
-def score_restaurant(restaurant, user_data):
-    score = 0
+def score_restaurant_for_group(restaurant, group_prefs, users):
+    # First, check if the restaurant meets all dietary requirements
+    if not meets_dietary_requirements(restaurant, group_prefs):
+        return -1  # Return a negative score for restaurants that don't meet dietary requirements
+
+    score = restaurant['rating'] * 2
     restaurant_categories = [cat['alias'].lower()
                              for cat in restaurant['categories']]
 
-    # Base score is the rating
-    score += restaurant['rating'] * 2
+    if all(pref.lower() in restaurant_categories or pref.lower() in restaurant['name'].lower() for pref in group_prefs["dietPref"]):
+        score += 10
 
-    # Check if cuisine matches user preferences (highest priority)
-    cuisine_match = False
-    for cuisine in user_data['cuisines']:
-        if cuisine.lower() in restaurant_categories:
-            score += 10  # Increased from 5 to 10
-            cuisine_match = True
-            break  # Only count one cuisine match
+    score += sum(5 for cuisine in group_prefs["cuisines"]
+                 if cuisine.lower() in restaurant_categories)
+    score += sum(3 for food in group_prefs["favFood"]
+                 if food.lower() in restaurant_categories)
+    score += sum(2 for cat in group_prefs["specialCategory"]
+                 if cat.lower() in restaurant_categories)
 
-    # Check if favorite food matches (second highest priority)
-    fav_food_match = False
-    for fav_food in user_data['favFood']:
-        if fav_food.lower() in restaurant_categories:
-            score += 4
-            fav_food_match = True
-            break  # Only count one favorite food match
+    if not group_prefs["alcohol"] and any('bar' in cat for cat in restaurant_categories):
+        score -= 5
 
-    # Bonus if both cuisine and favorite food match
-    if cuisine_match and fav_food_match:
-        score += 3
+    avg_age = sum(user["age"] for user in users) / len(users)
+    restaurant_price = len(restaurant.get('price', '$'))
+    if (avg_age < 25 and restaurant_price <= 2) or \
+       (25 <= avg_age < 40 and 2 <= restaurant_price <= 3) or \
+       (avg_age >= 40 and restaurant_price >= 3):
+        score += 2
 
-    # Check if special category matches (lower priority)
-    for special_cat in user_data['specialCategory']:
-        if special_cat.lower() in restaurant_categories:
-            score += 1
-
-    # Check price preference
-    restaurant_price = restaurant.get('price', '$')
-    restaurant_price_level = len(restaurant_price)
-    user_age = user_data['age']
-
-    if user_age < 25:
-        preferred_price_levels = [1, 2]
-    elif 25 <= user_age < 40:
-        preferred_price_levels = [2, 3]
-    else:
-        preferred_price_levels = [3, 4]
-
-    if restaurant_price_level in preferred_price_levels:
-        score += 1
-
-    # Penalty for alcohol if user doesn't prefer it
-    if not user_data['alcohol'] and any('bar' in cat.lower() for cat in restaurant_categories):
-        score -= 2
-
-    # Bonus for high review count (indicates popularity)
     review_count = restaurant.get('review_count', 0)
-    if review_count > 100:
-        score += 0.5
-    elif review_count > 500:
-        score += 1
+    score += 0.5 if review_count > 100 else 1 if review_count > 500 else 0
 
     return score
 
 
-def extract_categories_from_user(user_data):
-    # Start with dietary preferences
-    categories = user_data['dietPref']
+def get_category_combinations(categories):
+    return [','.join(combo) for r in range(1, 3) for combo in combinations(categories, r)]
 
-    # Extract other categories
-    other_categories = set()
 
-    # Properly handle cuisines
-    if user_data['cuisines']:
-        cuisines = user_data['cuisines'][0].split(', ')
-        for cuisine in cuisines:
-            # Find the key for the cuisine value
-            cuisine_key = next((key for key, value in cuisine_options.items(
-            ) if value.lower() == cuisine.lower()), None)
-            if cuisine_key:
-                other_categories.add(cuisine_key)
+def search_and_score_restaurants(category_combo, group_prefs, users, params):
+    all_results = []
+    try:
+        api_results = yelp_search(
+            location=params["location"],
+            category=category_combo,
+            pref_price=params["price"],
+            pref_date_time=params["pref_date_time"],
+        )
+        print(
+            f"Yelp API returned {len(api_results.get('businesses', []))} restaurants for {category_combo}")
+        for restaurant in api_results.get('businesses', []):
+            restaurant['score'] = score_restaurant_for_group(
+                restaurant, group_prefs, users)
+            all_results.append(restaurant)
+    except Exception as e:
+        print(f"Error searching for {category_combo}: {str(e)}")
+
+    print(f"Total restaurants after scoring: {len(all_results)}")
+    return sorted(all_results, key=lambda x: x['score'], reverse=True)[:30]
+
+
+def add_to_vector_db(restaurants):
+    existing_ids = set(restaurant_db.get()["ids"])
+    new_restaurants = [r for r in restaurants if r['id'] not in existing_ids]
+    if new_restaurants:
+        texts = [json.dumps(restaurant) for restaurant in new_restaurants]
+        metadatas = [{
+            "name": restaurant["name"],
+            "categories": ", ".join([cat["title"] for cat in restaurant["categories"]]),
+            "rating": restaurant["rating"],
+            "price": restaurant.get("price", "N/A"),
+            "score": restaurant["score"]
+        } for restaurant in new_restaurants]
+        ids = [restaurant["id"] for restaurant in new_restaurants]
+        restaurant_db.add_texts(texts=texts, metadatas=metadatas, ids=ids)
+        print(
+            f"Added {len(new_restaurants)} new restaurants to the vector database.")
+    else:
+        print(
+            f"No new restaurants to add. All {len(restaurants)} restaurants already exist in the database.")
+
+    # Print the size of the database
+    print(
+        f"Current size of the database: {len(restaurant_db.get()['ids'])} restaurants")
+
+def format_restaurant_for_llm(restaurant):
+    return f"""
+    Name: {restaurant['name']}
+    Rating: {restaurant['rating']}
+    Price: {restaurant.get('price', 'N/A')}
+    Categories: {', '.join([cat['title'] for cat in restaurant['categories']])}
+    Address: {' '.join(restaurant['location']['display_address'])}
+    Phone: {restaurant.get('phone', 'N/A')}
+    Review Count: {restaurant['review_count']}
+    Score: {restaurant['score']}
+        """
+
+
+def llm_select_best_restaurants(top_restaurants, group_prefs, users):
+    restaurants_info = "\n".join(
+        [f"{r['id']} - {format_restaurant_for_llm(r)}" for r in top_restaurants])
+    user_info = "\n".join([f"""
+    User: {user['name']}
+    Age: {user['age']}
+    Gender: {user['gender']}
+    Dietary Preferences: {', '.join(user['dietPref'])}
+    Alcohol: {'Yes' if user['alcohol'] else 'No'}
+    Cuisines: {', '.join(user['cuisines'])}
+    Favorite Foods: {', '.join(user['favFood'])}
+    Special Categories: {', '.join(user['specialCategory'])}
+        """ for user in users])
+    print(user_info)
+    prompt = PromptTemplate(
+        input_variables=["restaurants", "user_info", "group_prefs_dietPref", "group_prefs_alcohol",
+                         "group_prefs_cuisines", "group_prefs_favFood", "group_prefs_specialCategory"],
+        template="""
+        You are an AI assistant tasked with selecting the best 3 restaurants for a group of people based on their preferences and the available options. 
+
+        Here's the information about the group:
+        {user_info}
+
+        Group preferences:
+        Dietary Preferences: {group_prefs_dietPref}
+        Alcohol: {group_prefs_alcohol}
+        Cuisines: {group_prefs_cuisines}
+        Favorite Foods: {group_prefs_favFood}
+        Special Categories: {group_prefs_specialCategory}
+
+        Here are the top restaurant options:
+        {restaurants}
+        IMPORTANT: Only use the information provided above. Do not introduce any cuisines, preferences, or restaurant details that are not explicitly mentioned in the given data.
+        Please analyze the restaurant options and the group's preferences. Select the best 3 restaurants that would satisfy the group as a whole, considering factors such as dietary restrictions, cuisine preferences, and any special requirements.
+        The score of each restaurant is calculated based on how closely it matches the group's preferences.
+
+        For each selected restaurant, provide a brief explanation of why it's a good choice for the group based on their preferences. Make sure to cite the exact preferences you referenced when making your decisions.
+        IMPORTANT: Follow the format below strictly and do not include any additional characters around the restaurant ID:
+
+        Your response should be in the following format:
+        1. [Restaurant ID] - [Restaurant Name] - [Specific explanation for the first restaurant, mentioning how it matches the group's preferences]
+        2. [Restaurant ID] - [Restaurant Name] - [Specific explanation for the second restaurant, mentioning how it matches the group's preferences]
+        3. [Restaurant ID] - [Restaurant Name] - [Specific explanation for the third restaurant, mentioning how it matches the group's preferences]
+
+        Selection:
+        """
+    )
+
+    llm_chain = RunnableSequence(prompt | llm)
+    llm_output = llm_chain.invoke({
+        "restaurants": restaurants_info,
+        "user_info": user_info,
+        "group_prefs_dietPref": ", ".join(group_prefs["dietPref"]),
+        "group_prefs_alcohol": "Yes" if group_prefs["alcohol"] else "No",
+        "group_prefs_cuisines": ", ".join(group_prefs["cuisines"]),
+        "group_prefs_favFood": ", ".join(group_prefs["favFood"]),
+        "group_prefs_specialCategory": ", ".join(group_prefs["specialCategory"])
+    })
+
+    print("Raw LLM output:")
+    print(llm_output)
+
+    # Parse the LLM output to get restaurant IDs, names, and explanations
+    lines = llm_output.strip().split('\n')
+    selected_restaurants = []
+
+    for line in lines:
+        line = line.strip()
+        if line.startswith(("1.", "2.", "3.")):
+            parts = line.split('. ', 1)[-1].split(' - ', 2)
+            if len(parts) == 3:
+                restaurant_id, restaurant_name, explanation = parts
+                # Remove asterisks from the beginning of the ID
+                restaurant_id = restaurant_id.lstrip('*')
+                selected_restaurants.append(
+                    (restaurant_id, restaurant_name, explanation.strip()))
             else:
-                print(
-                    f"Warning: Cuisine '{cuisine}' not found in cuisine_options.")
+                print(f"Warning: Unexpected format in line: {line}")
 
-    # Add favorite foods
-    for food in user_data['favFood']:
-        if food:  # Check if the food is not an empty string
-            food_key = next((key for key, value in fav_food_options.items(
-            ) if value.lower() == food.lower()), None)
-            if food_key:
-                other_categories.add(food_key)
-            else:
-                print(
-                    f"Warning: Favorite food '{food}' not found in fav_food_options.")
+    print("Parsed restaurant IDs, names, and explanations:", selected_restaurants)
 
-    # Add special categories
-    for category in user_data['specialCategory']:
-        category_key = next((key for key, value in special_food_options.items(
-        ) if value.lower() == category.lower()), None)
-        if category_key:
-            other_categories.add(category_key)
+    # Ensure we have 3 restaurants
+    selected_restaurants = selected_restaurants[:3]
+
+    # Create a dictionary for quick lookup of restaurant details
+    restaurant_dict = {r['id']: r for r in top_restaurants}
+
+    # Find the full information for the selected restaurants
+    top_3_restaurants = []
+    for restaurant_id, restaurant_name, explanation in selected_restaurants:
+        restaurant = restaurant_dict.get(restaurant_id)
+        if restaurant:
+            restaurant_data = restaurant.copy()
+            restaurant_data['explanation'] = explanation
+            top_3_restaurants.append(restaurant_data)
         else:
             print(
-                f"Warning: Special category '{category}' not found in special_food_options.")
+                f"Warning: Could not find restaurant with ID '{restaurant_id}' in top_restaurants")
 
-    if user_data['alcohol']:
-        other_categories.update(alcohol_options.keys())
+    if not top_3_restaurants:
+        print("Warning: No restaurants were selected. Returning top 3 from original list.")
+        top_3_restaurants = [r.copy() for r in top_restaurants[:3]]
+        for r in top_3_restaurants:
+            r['explanation'] = "Selected as a fallback option."
 
-    # Filter to valid categories
-    valid_other_categories = list(
-        other_categories.intersection(valid_categories))
-
-    # Combine categories with dietary preferences first
-    all_categories = categories + valid_other_categories
-
-    # Remove duplicates while preserving order
-    unique_categories = []
-    for category in all_categories:
-        if category not in unique_categories:
-            unique_categories.append(category)
-
-    return ','.join(unique_categories)
+    return top_3_restaurants
 
 
-def adaptive_yelp_search(user_data, max_attempts=3):
+def adaptive_group_yelp_search(users):
+    global restaurant_db
+    # Empty the database at the start of each search
+    empty_db(restaurant_db)
+    group_prefs = extract_group_preferences(users)
+    print(f"Group Preferences: {group_prefs}")
     params = {
         "location": "Singapore",
-        "price": "1,2,3,4",  # Start with all price ranges
+        "price": "1,2,3,4",
         "pref_date_time": (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
     }
-    categories = extract_categories_from_user(user_data)
-    all_results = []
-    print(f"Initial categories: {categories}")
 
-    for attempt in range(max_attempts):
-        print(f"\nAttempt {attempt + 1}:")
-        print(f"Searching with categories: {categories}")
-
-        try:
-            api_results = yelp_search(
-                location=params["location"],
-                category=categories,
-                pref_price=params["price"],
-                pref_date_time=params["pref_date_time"]
-            )
-
-            evaluation = evaluate_results(
-                user_data,
-                categories.split(','),
-                api_results,
-                params["price"]
-            )
-            print(f"Evaluation: {evaluation}")
-
-            filtered_results = filter_restaurants_by_diet(
-                api_results.get('businesses', []), user_data['dietPref'])
-            for restaurant in filtered_results:
-                restaurant['score'] = score_restaurant(restaurant, user_data)
-
-            all_results.extend(filtered_results)
-            print(
-                f"Found {len(filtered_results)} results matching dietary preferences.")
-
-            if evaluation['new_categories']:
-                categories = evaluation['new_categories']
-            if evaluation['new_price']:
-                params["price"] = evaluation['new_price']
-
-        except Exception as e:
-            print(f"Error occurred: {str(e)}")
-            print("Traceback:")
-            import traceback
-            traceback.print_exc()
-
-    # Remove duplicates and sort by score
-    unique_results = {}
-    for restaurant in all_results:
-        if restaurant['id'] not in unique_results:
-            unique_results[restaurant['id']] = restaurant
-
-    top_recommendations = sorted(
-        unique_results.values(),
-        key=lambda x: x['score'],
-        reverse=True
-    )[:3]
-
-    return json.dumps([{
-        "name": restaurant['name'],
-        "rating": restaurant['rating'],
-        "price": restaurant.get('price', 'N/A'),
-        "phone": restaurant.get('phone', 'N/A'),
-        "address": ' '.join(restaurant['location']['display_address']),
-        "categories": [cat['title'] for cat in restaurant['categories']],
-        "url": restaurant['url'],
-        "score": restaurant['score']
-    } for restaurant in top_recommendations], indent=2)
+    unique_categories = list(set(group_prefs["dietPref"] +
+        group_prefs["cuisines"] + group_prefs["favFood"] + group_prefs["specialCategory"]))
+    category_combinations = get_category_combinations(unique_categories)
     
-    # Alternatively, return the last search's results
-    # If no satisfactory results found, use all results from the last attempt
-    # if not all_satisfactory_results:
-    #     print("\nNo satisfactory results found. Using all results from the last attempt.")
-    #     all_satisfactory_results = api_results.get('businesses', [])
-    #     for restaurant in all_satisfactory_results:
-    #         restaurant['score'] = score_restaurant(restaurant, user_data)
-    
+    all_top_restaurants = []
+    for category_combo in category_combinations:
+        print(f"\nSearching for category combination: {category_combo}")
+        top_restaurants = search_and_score_restaurants(
+            category_combo, group_prefs, users, params)
+        all_top_restaurants.extend(top_restaurants)
+        add_to_vector_db(top_restaurants)
+
+    unique_restaurants = {r['id']: r for r in all_top_restaurants}
+    final_top_restaurants = sorted(
+        unique_restaurants.values(), key=lambda x: x['score'], reverse=True)[:30]
+
+    return final_top_restaurants
 
 
 # Example usage
-example_user = {
-    "name": "John Doe",
-    "userName": "johndoe123",
-    "age": 25,
-    "gender": "male",
-    "dietPref": ['vegetarian'],
-    "alcohol": False,
-    "cuisines": ["Indian, Mexican"],
-    "favFood": [""],
-    "specialCategory": [],
-    "activityPref": ['outdoor', 'cultural', 'entertainment']
-}
+example_users = [
+    {
+        "name": "John Doe",
+        "userName": "johndoe123",
+        "age": 25,
+        "gender": "male",
+        "dietPref": ['vegetarian'],
+        "alcohol": False,
+        "cuisines": ["Indian", "Mexican"],
+        "favFood": [""],
+        "specialCategory": [],
+        "activityPref": ['outdoor', 'cultural', 'entertainment']
+    },
+    {
+        "name": "Emily Clark",
+        "userName": "emilyc987",
+        "age": 30,
+        "gender": "female",
+        "dietPref": [],
+        "alcohol": True,
+        "cuisines": ["Indian", "Japanese"],
+        "favFood": [],
+        "specialCategory": [],
+        "activityPref": ['fitness', 'outdoor', 'social']
+    },
+    {
+        "name": "Alex Martinez",
+        "userName": "alex_mart",
+        "age": 28,
+        "gender": "male",
+        "dietPref": ['halal'],
+        "alcohol": False,
+        "cuisines": ["Filipino"],
+        "favFood": [],
+        "specialCategory": [],
+        "activityPref": ['adventure', 'entertainment', 'indoor']
+    },
+    {
+        "name": "Sophie Lee",
+        "userName": "sophieleee",
+        "age": 22,
+        "gender": "female",
+        "dietPref": [''],
+        "alcohol": True,
+        "cuisines": ["Mediterranean"],
+        "favFood": [],
+        "specialCategory": [""],
+        "activityPref": ['cultural', 'relaxation', 'outdoor']
+    }
+]
 
-final_results = adaptive_yelp_search(example_user,max_attempts=3)
-print("\nFinal Recommendations:")
-print(final_results)
+top_restaurants = adaptive_group_yelp_search(example_users)
+
+group_prefs = extract_group_preferences(example_users)
+# Debugging prints
+print(f"Number of restaurants before LLM selection: {len(top_restaurants)}")
+print(
+    f"First restaurant in top_restaurants: {top_restaurants[0] if top_restaurants else 'No restaurants'}")
+
+llm_recommendations = llm_select_best_restaurants(top_restaurants, group_prefs, example_users)
+
+print(f"Number of restaurants after LLM selection: {len(llm_recommendations)}")
+print("\nTop 3 Restaurants with Explanations:")
+print(json.dumps(llm_recommendations, indent=2))
+
+# # Optionally, persist the vector database
+# restaurant_db.persist()
+
+# # Modified evaluate_results_template to include relevant restaurant information
+# evaluate_results_template = PromptTemplate(
+#     input_variables=["user_data", "categories", "api_results",
+#                      "current_price", "similar_restaurants"],
+#     template="""
+#     User: {user_data}
+#     Categories: {categories}
+#     Current Price Range: {current_price}
+#     Results: {api_results}
+#     Similar Restaurants: {similar_restaurants}
+    
+#     Evaluate if the results are satisfactory for a restaurant search in Singapore, ensuring dietary preferences are always met.
+#     Consider the similar restaurants when making your evaluation.
+#     Results are satisfactory when dietary preferences are all met and as many cuisines and food options match the user's preferences as possible.
+#     If not fully satisfactory but results are present, suggest improvements while accepting current results.
+#     If no results, suggest significant changes to broaden the search.
+
+#     Respond ONLY with a JSON object in the following format, and nothing else:
+#     {{
+#         "satisfactory": true/false,
+#         "reason": "Your reason here",
+#         "new_categories": "cat1,cat2,cat3",
+#         "new_price": "1,2,3,4"
+#     }}
+
+#     JSON Response:
+#     """
+# )
+
