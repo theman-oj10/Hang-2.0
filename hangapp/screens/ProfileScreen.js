@@ -1,38 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, ScrollView, TextInput, TouchableOpacity, Modal } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 
-const ProfileScreen = () => {
-  const [profile, setProfile] = useState({
-    name: 'John Doe',
-    userName: 'johndoe123',
-    email: 'johndoe@example.com',
-    password: "password123",
-    age: 25,
-    gender: 'male',
-    dietPref: ['vegetarian'],
-    alcohol: false,
-    cuisines: ['Indian', 'Mexican'],
-    favFood: [''],
-    specialCategory: [],
-    activityPref: ['outdoor', 'cultural', 'entertainment'],
-  });
-
+const ProfileScreen = ({ route }) => {
+  const [profile, setProfile] = useState(route.params?.profile);
   const [isEditing, setIsEditing] = useState(false);
   const [fieldBeingEdited, setFieldBeingEdited] = useState(null);
   const [tempValue, setTempValue] = useState('');
 
+  useEffect(() => {
+    if (route.params?.profile) {
+      setProfile(route.params.profile);
+    }
+  }, [route.params?.profile]);
+
   const handleEditPress = (field) => {
     setFieldBeingEdited(field);
-    setTempValue(profile[field].toString());
+    setTempValue(Array.isArray(profile[field]) ? profile[field].join(', ') : profile[field].toString());
     setIsEditing(true);
   };
 
   const handleSavePress = () => {
-    setProfile({ ...profile, [fieldBeingEdited]: tempValue.split(', ') });
+    setProfile(prevProfile => ({
+      ...prevProfile,
+      [fieldBeingEdited]: Array.isArray(prevProfile[fieldBeingEdited]) ? tempValue.split(', ') : tempValue
+    }));
     setIsEditing(false);
     setFieldBeingEdited(null);
   };
+
+  if (!profile) {
+    return <Text>Loading...</Text>;
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -42,7 +41,6 @@ const ProfileScreen = () => {
       />
       <Text style={styles.name}>{profile.name}</Text>
       <Text style={styles.userName}>@{profile.userName}</Text>
-      <Text style={styles.email}>{profile.email}</Text>
 
       <View style={styles.detailsContainer}>
         <ProfileDetail
@@ -124,7 +122,6 @@ const ProfileDetail = ({ label, value, onEdit }) => (
     </TouchableOpacity>
   </View>
 );
-
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,

@@ -345,71 +345,36 @@ def adaptive_group_activity_search(users):
     return final_top_activities
 
 
-# Example usage
-example_users = [
-    {
-        "name": "John Doe",
-        "userName": "johndoe123",
-        "age": 25,
-        "gender": "male",
-        "dietPref": ['vegetarian'],
-        "alcohol": False,
-        "cuisines": ["Indian", "Mexican"],
-        "favFood": [""],
-        "specialCategory": [],
-        "activityPref": ['sports', 'cultural', 'entertainment']
-    },
-    {
-        "name": "Emily Clark",
-        "userName": "emilyc987",
-        "age": 30,
-        "gender": "female",
-        "dietPref": [],
-        "alcohol": True,
-        "cuisines": ["Indian", "Japanese"],
-        "favFood": [],
-        "specialCategory": [],
-        "activityPref": ['outdoor', 'social']
-    },
-    {
-        "name": "Alex Martinez",
-        "userName": "alex_mart",
-        "age": 28,
-        "gender": "male",
-        "dietPref": ['halal'],
-        "alcohol": False,
-        "cuisines": ["Filipino"],
-        "favFood": [],
-        "specialCategory": [],
-        "activityPref": ['entertainment', 'indoor']
-    },
-    {
-        "name": "Sophie Lee",
-        "userName": "sophieleee",
-        "age": 22,
-        "gender": "female",
-        "dietPref": [''],
-        "alcohol": True,
-        "cuisines": ["Mediterranean"],
-        "favFood": [],
-        "specialCategory": [""],
-        "activityPref": ['cultural', 'outdoor']
-    }
-]
 
-top_activities = adaptive_group_activity_search(example_users)
+def get_activity_recommendations(users):
+    top_activities = adaptive_group_activity_search(users)
+    group_prefs = extract_group_preferences(users)
 
-group_prefs = extract_group_preferences(example_users)
-print(f"Number of activities before LLM selection: {len(top_activities)}")
-print(
-    f"First activity in top_activities: {top_activities[0] if top_activities else 'No activities'}")
+    print(f"Number of activities before LLM selection: {len(top_activities)}")
+    print(
+        f"First activity in top_activities: {top_activities[0] if top_activities else 'No activities'}")
 
-llm_recommendations = llm_select_best_activities(
-    top_activities, group_prefs, example_users)
+    llm_recommendations = llm_select_best_activities(
+        top_activities, group_prefs, users)
+    print(f"Number of activities after LLM selection: {len(llm_recommendations)}")
+    print("\nTop 3 Activities with Explanations:")
+    print(json.dumps(llm_recommendations, indent=2))
+    return llm_recommendations
 
-print(f"Number of activities after LLM selection: {len(llm_recommendations)}")
-print("\nTop 3 Activities with Explanations:")
-print(json.dumps(llm_recommendations, indent=2))
+# Make sure to import all necessary functions and modules at the top of the file
+# top_activities = adaptive_group_activity_search(example_users)
+
+# group_prefs = extract_group_preferences(example_users)
+# print(f"Number of activities before LLM selection: {len(top_activities)}")
+# print(
+#     f"First activity in top_activities: {top_activities[0] if top_activities else 'No activities'}")
+
+# llm_recommendations = llm_select_best_activities(
+#     top_activities, group_prefs, example_users)
+
+# print(f"Number of activities after LLM selection: {len(llm_recommendations)}")
+# print("\nTop 3 Activities with Explanations:")
+# print(json.dumps(llm_recommendations, indent=2))
 
 # Optionally, persist the vector database
 # activity_db.persist()

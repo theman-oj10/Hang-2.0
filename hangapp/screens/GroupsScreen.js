@@ -1,40 +1,42 @@
-import React from 'react';
-import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet } from 'react-native';
-
-const sampleAvatars = [
-  { id: 1, source: require('../assets/logo.png') },
-  { id: 2, source: require('../assets/logo.png') },
-  { id: 3, source: require('../assets/logo.png') },
-  { id: 4, source: require('../assets/logo.png') },
-  { id: 5, source: require('../assets/logo.png') },
-];
-
-// Function to get a random subset of avatars
-const getRandomAvatars = (avatars) => {
-  const randomCount = Math.floor(Math.random() * avatars.length) + 1; // Random count between 1 and the length of avatars
-  const shuffled = avatars.sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, randomCount);
-};
-
-const groups = [
-  {
-    id: '1',
-    name: 'Family Vacation',
-    avatars: getRandomAvatars(sampleAvatars),
-  },
-  {
-    id: '2',
-    name: 'Friends Reunion',
-    avatars: getRandomAvatars(sampleAvatars),
-  },
-  {
-    id: '3',
-    name: 'Work Retreat',
-    avatars: getRandomAvatars(sampleAvatars),
-  },
-];
+import React, { useState, useEffect } from 'react';
+import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet, ActivityIndicator } from 'react-native';
 
 const GroupsScreen = ({ navigation }) => {
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchGroups();
+  }, []);
+
+  const fetchGroups = async () => {
+    try {
+      const response = await fetch('http://192.168.1.105:4000/api/get_group');
+      const data = await response.json();
+      setGroups([
+        {
+          id: '1',
+          name: 'Uni Friends',
+          members: data,
+        },
+        {
+          id: '2',
+          name: 'Family',
+          members: data,
+        },
+        {
+          id: '3',
+          name: 'Work Buddies',
+          members: data,
+        },
+      ]);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching groups:', error);
+      setLoading(false);
+    }
+  };
+
   const renderItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.groupItem} 
@@ -43,13 +45,28 @@ const GroupsScreen = ({ navigation }) => {
       <View style={styles.groupHeader}>
         <Text style={styles.groupName}>{item.name}</Text>
         <View style={styles.avatarGroup}>
-          {item.avatars.map((avatar, index) => (
-            <Image key={index} source={avatar.source} style={styles.avatar} />
+          {item.members.map((member, index) => (
+            <TouchableOpacity
+              key={index}
+              onPress={() => navigation.navigate('Profile', { profile: member })}
+            >
+              <Image
+                source={require('../assets/logo.png')}
+                style={[
+                  styles.avatar,
+                  { zIndex: item.members.length - index } // To maintain proper stacking order
+                ]}
+              />
+            </TouchableOpacity>
           ))}
         </View>
       </View>
     </TouchableOpacity>
   );
+
+  if (loading) {
+    return <ActivityIndicator size="large" color="#0000ff" />;
+  }
 
   return (
     <View style={styles.container}>

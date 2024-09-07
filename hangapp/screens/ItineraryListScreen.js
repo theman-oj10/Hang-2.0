@@ -1,45 +1,55 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, Image, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
+import { View, Text, FlatList, TouchableOpacity, Image, ActivityIndicator, StyleSheet, SafeAreaView } from 'react-native';
 import BottomNavBar from './BottomNavBar'; // Import the BottomNavBar component
-
-const sampleAvatars = [
-  { id: 1, source: require('../assets/logo.png') },
-  { id: 2, source: require('../assets/logo.png') },
-  { id: 3, source: require('../assets/logo.png') },
-  { id: 4, source: require('../assets/logo.png') },
-  { id: 5, source: require('../assets/logo.png') },
-];
 
 const ItineraryListScreen = ({ navigation, route }) => {
   const [itineraries, setItineraries] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch data when the component is mounted
   useEffect(() => {
     fetchItineraries();
   }, []);
+   useLayoutEffect(() => {
+    navigation.setOptions({
+      headerShown: false, // This hides the default header
+    });
+  }, [navigation]);
 
   const fetchItineraries = async () => {
     try {
-      // Replace with your actual API URL
-      const response = await fetch('');
+      const response = await fetch('http://192.168.1.105:4000/api/recommend2');
       const data = await response.json();
 
-      // Map the data to match your itinerary structure, including the price
-      const mappedData = data.map((restaurant, index) => ({
-        id: index + 1,
-        title: `Itinerary Option ${index + 1}`,
-        activities: [
-          {
-            time: "09:00 AM",
-            activity: `Visit ${restaurant.name}`,
-            description: `Enjoy a meal at ${restaurant.name}, rated ${restaurant.rating} stars. Price: ${restaurant.price}. Located at ${restaurant.address}.`,
+      if (data.status === 'success') {
+        const mappedData = [];
+        for (let i = 0; i < 3; i++) {
+          const restaurant = data.restaurant_recommendations[i];
+          const activity = data.activity_recommendations[i];
+          
+          if (restaurant && activity) {
+            mappedData.push({
+              id: i + 1,
+              title: `Itinerary ${i + 1}`,
+              restaurant: {
+                time: '12:00 PM',
+                activity: `Dine at ${restaurant.name}`,
+                description: restaurant.explanation,
+                image: restaurant.image_url || null,
+              },
+              activity: {
+                time: '3:00 PM',
+                activity: `Visit ${activity.name}`,
+                description: activity.explanation,
+                image: activity.image_url || null,
+              },
+            });
           }
-        ],
-        image: require('../assets/logo.png'), // Placeholder image, replace as needed
-      }));
+        }
 
-      setItineraries(mappedData);
+        setItineraries(mappedData);
+      } else {
+        console.error('API response was not successful');
+      }
       setLoading(false);
     } catch (error) {
       console.error('Error fetching itineraries:', error);
@@ -52,8 +62,8 @@ const ItineraryListScreen = ({ navigation, route }) => {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.groupTitle}>{route.params.groupName}</Text>
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.groupTitle}>{route.params?.groupName || 'Family Vacation'}</Text>
       <FlatList
         data={itineraries}
         renderItem={({ item }) => (
@@ -61,87 +71,70 @@ const ItineraryListScreen = ({ navigation, route }) => {
             style={styles.card} 
             onPress={() => navigation.navigate('ItineraryDetail', { itinerary: item })}
           >
-            <Image source={item.image} style={styles.cardImage} />
+            <Image 
+              source={{ uri: item.restaurant.image || item.activity.image || 'https://via.placeholder.com/300' }} 
+              style={styles.cardImage} 
+            />
             <View style={styles.cardContent}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>{item.title}</Text>
-                <View style={styles.avatarGroup}>
-                  {sampleAvatars.map((avatar) => (
-                    <Image key={avatar.id} source={avatar.source} style={styles.avatar} />
-                  ))}
-                </View>
-              </View>
+              <Text style={styles.cardTitle}>{item.title}</Text>
+              <Text style={styles.cardDescription} numberOfLines={2}>
+                {item.restaurant.activity}, {item.activity.activity}
+              </Text>
             </View>
           </TouchableOpacity>
         )}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
       />
       <BottomNavBar />
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#E6F7FF',
-    padding: 16,
+    backgroundColor: '#f5f5f5',
   },
   groupTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 20,
+    padding: 16,
+    textAlign: 'center',
+    color: '#004AAD', // Matching the blue color from your previous design
   },
   listContent: {
-    paddingBottom: 32,
+    padding: 16,
   },
   card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    marginBottom: 20,
+    backgroundColor: 'white',
+    borderRadius: 8,
     overflow: 'hidden',
-    elevation: 5,
+    marginBottom: 16,
+    elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   cardImage: {
     width: '100%',
-    height: 160,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    height: 200,
+    resizeMode: 'cover',
   },
   cardContent: {
     padding: 16,
-    backgroundColor: '#FFF',
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
   },
   cardTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
+    marginBottom: 8,
+    color: '#004AAD', // Matching the blue color from your previous design
   },
-  avatarGroup: {
-    flexDirection: 'row',
-  },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginLeft: -8,
-    borderWidth: 2,
-    borderColor: '#fff',
+  cardDescription: {
+    fontSize: 14,
+    color: '#666',
   },
 });
 
