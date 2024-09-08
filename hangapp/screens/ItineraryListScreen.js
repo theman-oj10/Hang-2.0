@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, Image, ActivityIndicator, StyleSheet, SafeAreaView } from 'react-native';
-import BottomNavBar from './BottomNavBar'; // Import the BottomNavBar component
+import BottomNavBar from './BottomNavBar'; 
 
 const ItineraryListScreen = ({ navigation, route }) => {
   const [itineraries, setItineraries] = useState([]);
@@ -9,7 +9,8 @@ const ItineraryListScreen = ({ navigation, route }) => {
   useEffect(() => {
     fetchItineraries();
   }, []);
-   useLayoutEffect(() => {
+
+  useLayoutEffect(() => {
     navigation.setOptions({
       headerShown: false, // This hides the default header
     });
@@ -17,7 +18,7 @@ const ItineraryListScreen = ({ navigation, route }) => {
 
   const fetchItineraries = async () => {
     try {
-      const response = await fetch('http://192.168.1.105:4000/api/recommend2');
+      const response = await fetch('http://127.0.0.1:4000//api/recommend2');
       const data = await response.json();
 
       if (data.status === 'success') {
@@ -25,7 +26,7 @@ const ItineraryListScreen = ({ navigation, route }) => {
         for (let i = 0; i < 3; i++) {
           const restaurant = data.restaurant_recommendations[i];
           const activity = data.activity_recommendations[i];
-          
+
           if (restaurant && activity) {
             mappedData.push({
               id: i + 1,
@@ -35,12 +36,16 @@ const ItineraryListScreen = ({ navigation, route }) => {
                 activity: `Dine at ${restaurant.name}`,
                 description: restaurant.explanation,
                 image: restaurant.image_url || null,
+                price: restaurant.price, 
+                rating: restaurant.rating, 
               },
               activity: {
                 time: '3:00 PM',
                 activity: `Visit ${activity.name}`,
                 description: activity.explanation,
                 image: activity.image_url || null,
+                price: activity.price,  
+                rating: activity.rating,
               },
             });
           }
@@ -69,7 +74,7 @@ const ItineraryListScreen = ({ navigation, route }) => {
         renderItem={({ item }) => (
           <TouchableOpacity 
             style={styles.card} 
-            onPress={() => navigation.navigate('ItineraryDetail', { itinerary: item })}
+            onPress={() => navigation.navigate('ItineraryDetail', { itinerary: item })} 
           >
             <Image 
               source={{ uri: item.restaurant.image || item.activity.image || 'https://via.placeholder.com/300' }} 
@@ -102,7 +107,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     padding: 16,
     textAlign: 'center',
-    color: '#004AAD', // Matching the blue color from your previous design
+    color: '#004AAD',
   },
   listContent: {
     padding: 16,
@@ -130,7 +135,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 8,
-    color: '#004AAD', // Matching the blue color from your previous design
+    color: '#004AAD',
   },
   cardDescription: {
     fontSize: 14,

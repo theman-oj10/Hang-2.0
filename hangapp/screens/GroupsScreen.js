@@ -11,7 +11,7 @@ const GroupsScreen = ({ navigation }) => {
 
   const fetchGroups = async () => {
     try {
-      const response = await fetch('http://192.168.1.105:4000/api/get_group');
+      const response = await fetch('http://127.0.0.1:4000/api/get_group'); // Fetch data from your backend API
       const data = await response.json();
       setGroups([
         {
@@ -37,6 +37,19 @@ const GroupsScreen = ({ navigation }) => {
     }
   };
 
+  // Function to get avatar based on the username
+  const getAvatarForUser = (userName) => {
+    const avatarMap = {
+      'johndoe123': require('../assets/johndoe.png'),
+      'emilyc987': require('../assets/person2.png'),
+      'alex_mart': require('../assets/person3.png'),
+      'sophieleee': require('../assets/person4.png'),
+      'default': require('../assets/splash.png'), // Fallback image
+    };
+
+    return avatarMap[userName] || avatarMap['default']; // Return default image if username not found
+  };
+
   const renderItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.groupItem} 
@@ -48,10 +61,10 @@ const GroupsScreen = ({ navigation }) => {
           {item.members.map((member, index) => (
             <TouchableOpacity
               key={index}
-              onPress={() => navigation.navigate('Profile', { profile: member })}
+              onPress={() => navigation.navigate('Profile', { profile: member, profileImage: getAvatarForUser(member.userName) })} // Pass profile and profileImage
             >
               <Image
-                source={require('../assets/logo.png')}
+                source={getAvatarForUser(member.userName)} // Get image based on username
                 style={[
                   styles.avatar,
                   { zIndex: item.members.length - index } // To maintain proper stacking order

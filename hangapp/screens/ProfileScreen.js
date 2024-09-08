@@ -4,6 +4,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 
 const ProfileScreen = ({ route }) => {
   const [profile, setProfile] = useState(route.params?.profile);
+  const [profileImage, setProfileImage] = useState(route.params?.profileImage); // Profile image state
   const [isEditing, setIsEditing] = useState(false);
   const [fieldBeingEdited, setFieldBeingEdited] = useState(null);
   const [tempValue, setTempValue] = useState('');
@@ -11,8 +12,9 @@ const ProfileScreen = ({ route }) => {
   useEffect(() => {
     if (route.params?.profile) {
       setProfile(route.params.profile);
+      setProfileImage(route.params.profileImage); // Set the profile image when the profile changes
     }
-  }, [route.params?.profile]);
+  }, [route.params?.profile, route.params?.profileImage]);
 
   const handleEditPress = (field) => {
     setFieldBeingEdited(field);
@@ -36,7 +38,7 @@ const ProfileScreen = ({ route }) => {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Image
-        source={require('../assets/logo.png')}
+        source={profileImage} // Display profile image passed from GroupsScreen
         style={styles.profileImage}
       />
       <Text style={styles.name}>{profile.name}</Text>
@@ -122,6 +124,7 @@ const ProfileDetail = ({ label, value, onEdit }) => (
     </TouchableOpacity>
   </View>
 );
+
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
@@ -147,11 +150,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#777',
     marginBottom: 10,
-  },
-  email: {
-    fontSize: 18,
-    color: '#777',
-    marginBottom: 20,
   },
   detailsContainer: {
     width: '100%',

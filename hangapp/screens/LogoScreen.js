@@ -9,10 +9,9 @@ const LogoScreen = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <Image
-        source={require('../assets/logo.png')}
+        source={require('../assets/4.png')}
         style={styles.logo}
       />
-      <Text style={styles.title}>Hang</Text>
       <TouchableOpacity style={styles.startButton} onPress={handleStartPress}>
         <Text style={styles.startButtonText}>Let's Get Started!</Text>
       </TouchableOpacity>
@@ -29,19 +28,10 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   logo: {
-    width: 140,
-    height: 140,
+    width: '100%', // Make the image take up the full width
+    height: '60%', // Adjust the height as needed
+    resizeMode: 'contain', // Keep the image's aspect ratio
     marginBottom: 40,
-    borderRadius: 70, // Add rounding to the logo for a softer look
-    borderWidth: 3,
-    borderColor: '#ffffff',
-  },
-  title: {
-    fontSize: 32,
-    color: '#ffffff',
-    marginBottom: 50,
-    fontWeight: '700', // Make the title bolder
-    letterSpacing: 1.5, // Add a bit of letter spacing for better readability
   },
   startButton: {
     backgroundColor: '#ffffff',

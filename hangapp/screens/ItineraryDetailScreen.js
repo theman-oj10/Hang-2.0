@@ -1,9 +1,40 @@
 import React from 'react';
 import { View, Text, ScrollView, Image, StyleSheet, SafeAreaView } from 'react-native';
+import Icon from 'react-native-vector-icons/FontAwesome'; // Import FontAwesome icons
 import BottomNavBar from './BottomNavBar';
 
 const ItineraryDetailScreen = ({ route }) => {
   const { itinerary } = route.params;
+
+  // Helper function to display stars for rating
+  const renderStars = (rating) => {
+    const validRating = typeof rating === 'number' && rating >= 0 ? rating : 0;
+    const filledStars = Math.floor(validRating);
+    const emptyStars = 5 - filledStars;
+
+    return (
+      <View style={styles.ratingContainer}>
+        {[...Array(filledStars)].map((_, i) => (
+          <Icon key={i} name="star" size={18} color="#FFD700" />
+        ))}
+        {[...Array(emptyStars)].map((_, i) => (
+          <Icon key={i} name="star-o" size={18} color="#FFD700" />
+        ))}
+      </View>
+    );
+  };
+
+  // Helper function to display dollar signs for pricing
+  const renderPrice = (price) => {
+    const validPrice = typeof price === 'string' && price.length > 0 ? price.length : 1;
+    return (
+      <View style={styles.priceContainer}>
+        {[...Array(validPrice)].map((_, i) => (
+          <Icon key={i} name="usd" size={18} color="#666" />
+        ))}
+      </View>
+    );
+  };
 
   const renderActivity = (item, type) => (
     <View style={styles.activityItem}>
@@ -14,6 +45,12 @@ const ItineraryDetailScreen = ({ route }) => {
         <Image source={{ uri: item.image }} style={styles.activityImage} />
       )}
       <Text style={styles.description}>{item.description}</Text>
+
+      {/* Show price and rating for both restaurant and activity */}
+      <View style={styles.infoContainer}>
+        {renderStars(item.rating)}
+        {renderPrice(item.price)}
+      </View>
     </View>
   );
 
@@ -79,6 +116,18 @@ const styles = StyleSheet.create({
   description: {
     fontSize: 14,
     color: '#666',
+  },
+  infoContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+  },
+  priceContainer: {
+    flexDirection: 'row',
   },
 });
 
